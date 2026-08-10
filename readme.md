@@ -11,7 +11,7 @@ The model is downloaded **during `docker build`** and stored inside the Docker i
 The EC2 container runs FastAPI with Uvicorn:
 
 ```text
-ws://<EC2-IP>:8880/ws/tts
+ws://<EC2-IP>:8003/ws/tts
 ```
 
 ## Metrics
@@ -103,7 +103,7 @@ docker run -d \
   --gpus all \
   --restart unless-stopped \
   --name qwen3-tts \
-  -p 8880:8880 \
+  -p 8003:8003 \
   qwen3-tts
 ```
 
@@ -116,7 +116,7 @@ docker logs -f qwen3-tts
 Health:
 
 ```bash
-curl http://localhost:8880/health
+curl http://localhost:8003/health
 ```
 
 ## EC2 Security Group
@@ -148,7 +148,7 @@ python client.py \
 Example output:
 
 ```text
-[connect] ws://54.x.x.x:8880/ws/tts
+[connect] ws://54.x.x.x:8003/ws/tts
 [accepted] request_id=... speaker=Aiden language=English
 [audio-start] sample_rate=... audio_duration_s=...
 
