@@ -1,0 +1,6 @@
+qwen-tts
+fastapi
+uvicorn[standard]
+websockets>=15,<18
+numpy>=1.26,<3
+huggingface_hub[cli]
