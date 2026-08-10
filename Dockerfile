@@ -6,6 +6,7 @@ ENV https_proxy="http://163.116.128.80:8080"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 WORKDIR /app
 
@@ -28,24 +29,17 @@ RUN python3 -m venv /opt/venv
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install \
-    torch==2.6.0 \
-    torchvision==0.21.0 \
-    torchaudio==2.6.0 \
-    --index-url https://download.pytorch.org/whl/cu124
+RUN pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
 COPY requirement.txt .
 
 RUN pip install -r requirement.txt
 
-RUN mkdir -p /app/models && \
-    huggingface-cli download \
-    Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice \
-    --local-dir /app/models/Qwen3-TTS-12Hz-1.7B-CustomVoice
+RUN mkdir -p /app/models && huggingface-cli download Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice --local-dir /app/models/Qwen3-TTS-12Hz-0.6B-CustomVoice
 
 COPY server.py .
 COPY client.py .
 
-EXPOSE 8880
+EXPOSE 8003
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8880"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8003"]
