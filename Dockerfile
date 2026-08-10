@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV http_proxy="http://163.116.128.80:8080"
 ENV https_proxy="http://163.116.128.80:8080"
@@ -13,18 +13,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
+    python3-venv \
     ffmpeg \
+    sox \
+    libsox-fmt-all \
     libsndfile1 \
     git \
     curl \
     ca-certificates \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --break-system-packages setuptools wheel 
+RUN python3 -m venv /opt/venv
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install \
+    torch==2.6.0 \
+    torchvision==0.21.0 \
+    torchaudio==2.6.0 \
+    --index-url https://download.pytorch.org/whl/cu124
 
 COPY requirement.txt .
 
-RUN pip3 install --break-system-packages -r requirement.txt
+RUN pip install -r requirement.txt
 
 RUN mkdir -p /app/models && \
     huggingface-cli download \
@@ -34,6 +46,6 @@ RUN mkdir -p /app/models && \
 COPY server.py .
 COPY client.py .
 
-EXPOSE 8003
+EXPOSE 8880
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8880"]
