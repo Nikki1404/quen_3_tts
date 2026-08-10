@@ -11,7 +11,7 @@ from qwen_tts import Qwen3TTSModel
 
 app = FastAPI(title="Qwen3-TTS CustomVoice WebSocket Server")
 
-MODEL_PATH = "/app/models/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+MODEL_PATH = "/app/models/Qwen3-TTS-12Hz-0.6B-CustomVoice"
 AUDIO_CHUNK_BYTES = 65536
 
 print("=" * 90)
@@ -26,11 +26,13 @@ print(f"GPU            : {torch.cuda.get_device_name(0)}")
 print(f"Model path     : {MODEL_PATH}")
 
 load_start = time.perf_counter()
+
 model = Qwen3TTSModel.from_pretrained(
     MODEL_PATH,
     device_map="cuda:0",
     dtype=torch.bfloat16,
 )
+
 print(f"Model loaded   : {(time.perf_counter() - load_start):.2f} s")
 
 try:
