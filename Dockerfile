@@ -31,6 +31,6 @@ RUN mkdir -p /app/models && \
 COPY server.py .
 COPY client.py .
 
-EXPOSE 8880
+EXPOSE 8003
 
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8880"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8003"]
