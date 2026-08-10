@@ -203,7 +203,7 @@ def parse_args():
 
     parser.add_argument(
         "--server",
-        default="ws://127.0.0.1:8880/ws/tts",
+        default="ws://127.0.0.1:8003/ws/tts",
     )
     parser.add_argument("--text", required=True)
     parser.add_argument("--language", default="English")
