@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
+RUN python3 -m pip install --break-system-packages setuptools wheel 
 
 COPY requirement.txt .
 
