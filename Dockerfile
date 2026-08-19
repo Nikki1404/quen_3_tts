@@ -6,44 +6,40 @@ ENV https_proxy="http://163.116.128.80:8080"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-# Triton / torch.compile may need a compiler at runtime
-ENV CC=/usr/bin/gcc
-ENV CXX=/usr/bin/g++
+WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
-    gcc \
-    g++ \
-    build-essential \
-    git \
-    libsndfile1 \
+    python3-venv \
     ffmpeg \
+    sox \
+    libsox-fmt-all \
+    libsndfile1 \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+RUN python3 -m venv /opt/venv
 
-RUN python3 -m pip install --upgrade \
-    pip \
-    setuptools \
-    wheel
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Install PyTorch explicitly for CUDA 12.4
-RUN pip3 install \
-    torch \
-    torchvision \
-    torchaudio \
-    --index-url https://download.pytorch.org/whl/cu124
+RUN pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 
-COPY requirements.txt /app/requirements.txt
+COPY requirement.txt .
 
-RUN pip3 install -r /app/requirements.txt
+RUN pip install -r requirement.txt
 
-COPY server.py /app/server.py
-COPY client.py /app/client.py
+RUN mkdir -p /app/models && huggingface-cli download Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice --local-dir /app/models/Qwen3-TTS-12Hz-0.6B-CustomVoice
 
-EXPOSE 8000
+COPY server.py .
+COPY client.py .
 
-CMD ["python3", "server.py"]
+EXPOSE 8003
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8003"]
