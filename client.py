@@ -5,17 +5,22 @@ import time
 import wave
 from pathlib import Path
 
+import httpx
 import numpy as np
 import sounddevice as sd
 from websockets.asyncio.client import connect
 
 
 # =============================================================================
-# DEFAULT CLOUD RUN WEBSOCKET URL
+# DEFAULT ENDPOINTS
 # =============================================================================
 
-DEFAULT_SERVER = (
+DEFAULT_WS_SERVER = (
     "wss://qwen3-tts-150916788856.us-central1.run.app/ws/tts"
+)
+
+DEFAULT_OPENAI_SERVER = (
+    "https://qwen3-tts-150916788856.us-central1.run.app/v1/audio/speech"
 )
 
 
@@ -35,10 +40,71 @@ def elapsed_ms(start_ns, end_ns=None):
 
 
 # =============================================================================
-# CLIENT
+# AUDIO PLAYBACK
 # =============================================================================
 
-async def run_client(
+def play_pcm16(
+    pcm,
+    sample_rate,
+    channels=1,
+):
+    audio = np.frombuffer(
+        pcm,
+        dtype=np.int16,
+    )
+
+    if channels > 1:
+        audio = audio.reshape(
+            -1,
+            channels,
+        )
+
+    audio = (
+        audio.astype(np.float32)
+        / 32768.0
+    )
+
+    print()
+    print("[play] Playing audio...")
+
+    sd.play(
+        audio,
+        samplerate=sample_rate,
+    )
+
+    sd.wait()
+
+    print("[play] Finished.")
+
+
+def play_wav(
+    output_path,
+):
+    with wave.open(
+        str(output_path),
+        "rb",
+    ) as wav_file:
+
+        channels = wav_file.getnchannels()
+
+        sample_rate = wav_file.getframerate()
+
+        frames = wav_file.readframes(
+            wav_file.getnframes()
+        )
+
+    play_pcm16(
+        frames,
+        sample_rate,
+        channels,
+    )
+
+
+# =============================================================================
+# WEBSOCKET CLIENT
+# =============================================================================
+
+async def run_websocket(
     server,
     text,
     language,
@@ -47,7 +113,6 @@ async def run_client(
     output,
     play,
 ):
-
     payload = {
         "text": text,
         "language": language,
@@ -64,7 +129,7 @@ async def run_client(
     server_metrics = {}
 
     # =========================================================================
-    # END-TO-END TIMER STARTS BEFORE WEBSOCKET CONNECTION
+    # END-TO-END TIMER
     # =========================================================================
 
     overall_start_ns = now_ns()
@@ -73,14 +138,12 @@ async def run_client(
 
     print()
     print("=" * 80)
-    print("QWEN3-TTS CLIENT")
+    print("QWEN3-TTS WEBSOCKET CLIENT")
     print("=" * 80)
 
-    print(f"[connect] {server}")
-
-    # =========================================================================
-    # WEBSOCKET CONNECTION
-    # =========================================================================
+    print(
+        f"[connect] {server}"
+    )
 
     async with connect(
         server,
@@ -123,16 +186,12 @@ async def run_client(
             request_sent_ns,
         )
 
-        # =====================================================================
-        # RESPONSE TIMESTAMPS
-        # =====================================================================
-
         first_response_received_ns = None
         first_audio_received_ns = None
         done_received_ns = None
 
         # =====================================================================
-        # RECEIVE SERVER EVENTS / AUDIO
+        # RECEIVE
         # =====================================================================
 
         async for message in websocket:
@@ -140,18 +199,28 @@ async def run_client(
             received_ns = now_ns()
 
             # -----------------------------------------------------------------
-            # BINARY MESSAGE = PCM AUDIO
+            # PCM AUDIO
             # -----------------------------------------------------------------
 
-            if isinstance(message, bytes):
+            if isinstance(
+                message,
+                bytes,
+            ):
 
-                if first_audio_received_ns is None:
+                if (
+                    first_audio_received_ns
+                    is None
+                ):
 
-                    first_audio_received_ns = received_ns
+                    first_audio_received_ns = (
+                        received_ns
+                    )
 
-                    request_ttfa_ms = elapsed_ms(
-                        request_start_ns,
-                        first_audio_received_ns,
+                    request_ttfa_ms = (
+                        elapsed_ms(
+                            request_start_ns,
+                            first_audio_received_ns,
+                        )
                     )
 
                     e2e_ttfa_ms = elapsed_ms(
@@ -161,41 +230,50 @@ async def run_client(
 
                     print(
                         f"[first-audio] "
-                        f"request_ttfa={request_ttfa_ms:.2f} ms "
-                        f"e2e_ttfa={e2e_ttfa_ms:.2f} ms"
+                        f"request_ttfa="
+                        f"{request_ttfa_ms:.2f} ms "
+                        f"e2e_ttfa="
+                        f"{e2e_ttfa_ms:.2f} ms"
                     )
 
-                pcm.extend(message)
+                pcm.extend(
+                    message
+                )
 
                 continue
 
             # -----------------------------------------------------------------
-            # JSON CONTROL MESSAGE
+            # JSON EVENT
             # -----------------------------------------------------------------
 
-            event = json.loads(message)
+            event = json.loads(
+                message
+            )
 
-            event_type = event.get("type")
+            event_type = event.get(
+                "type"
+            )
 
-            if first_response_received_ns is None:
-                first_response_received_ns = received_ns
+            if (
+                first_response_received_ns
+                is None
+            ):
 
-            # -----------------------------------------------------------------
-            # ACCEPTED
-            # -----------------------------------------------------------------
+                first_response_received_ns = (
+                    received_ns
+                )
 
             if event_type == "accepted":
 
                 print(
                     f"[accepted] "
-                    f"request_id={event.get('request_id')} "
-                    f"speaker={event.get('speaker')} "
-                    f"language={event.get('language')}"
+                    f"request_id="
+                    f"{event.get('request_id')} "
+                    f"speaker="
+                    f"{event.get('speaker')} "
+                    f"language="
+                    f"{event.get('language')}"
                 )
-
-            # -----------------------------------------------------------------
-            # AUDIO START
-            # -----------------------------------------------------------------
 
             elif event_type == "audio_start":
 
@@ -219,29 +297,26 @@ async def run_client(
 
                 print(
                     f"[audio-start] "
-                    f"sample_rate={sample_rate} "
+                    f"sample_rate="
+                    f"{sample_rate} "
                     f"audio_duration_s="
                     f"{event.get('audio_duration_s')}"
                 )
 
-            # -----------------------------------------------------------------
-            # DONE
-            # -----------------------------------------------------------------
-
             elif event_type == "done":
 
-                done_received_ns = received_ns
+                done_received_ns = (
+                    received_ns
+                )
 
-                server_metrics = event.get(
-                    "server_metrics",
-                    {},
+                server_metrics = (
+                    event.get(
+                        "server_metrics",
+                        {},
+                    )
                 )
 
                 break
-
-            # -----------------------------------------------------------------
-            # ERROR
-            # -----------------------------------------------------------------
 
             elif event_type == "error":
 
@@ -253,30 +328,30 @@ async def run_client(
                 )
 
         # =====================================================================
-        # VALIDATE RESPONSE
+        # VALIDATION
         # =====================================================================
 
         if first_response_received_ns is None:
 
             raise RuntimeError(
-                "No response received from server."
+                "No response received."
             )
 
         if first_audio_received_ns is None:
 
             raise RuntimeError(
-                "No audio received from server."
+                "No audio received."
             )
 
         if done_received_ns is None:
 
-            done_received_ns = now_ns()
+            done_received_ns = (
+                now_ns()
+            )
 
         # =====================================================================
-        # CLIENT REQUEST METRICS
-        #
-        # These start AFTER WebSocket connection.
-        # =========================================================================
+        # METRICS
+        # =====================================================================
 
         client_ttfb_ms = elapsed_ms(
             request_start_ns,
@@ -293,19 +368,12 @@ async def run_client(
             done_received_ns,
         )
 
-        first_audio_to_done_ms = elapsed_ms(
-            first_audio_received_ns,
-            done_received_ns,
+        first_audio_to_done_ms = (
+            elapsed_ms(
+                first_audio_received_ns,
+                done_received_ns,
+            )
         )
-
-        # =====================================================================
-        # END-TO-END METRICS
-        #
-        # These start BEFORE WebSocket connection.
-        #
-        # Therefore cold-start / Cloud Run startup delay occurring during
-        # connection establishment is included.
-        # =====================================================================
 
         e2e_ttfb_ms = elapsed_ms(
             overall_start_ns,
@@ -322,18 +390,8 @@ async def run_client(
             done_received_ns,
         )
 
-        connection_to_first_response_ms = elapsed_ms(
-            connected_ns,
-            first_response_received_ns,
-        )
-
-        connection_to_first_audio_ms = elapsed_ms(
-            connected_ns,
-            first_audio_received_ns,
-        )
-
     # =========================================================================
-    # AUDIO VALIDATION
+    # SAVE WAV
     # =========================================================================
 
     if not pcm:
@@ -345,14 +403,12 @@ async def run_client(
     if sample_rate is None:
 
         raise RuntimeError(
-            "Sample rate was not received."
+            "Sample rate not received."
         )
 
-    # =========================================================================
-    # SAVE WAV
-    # =========================================================================
-
-    output_path = Path(output)
+    output_path = Path(
+        output
+    )
 
     output_path.parent.mkdir(
         parents=True,
@@ -381,16 +437,16 @@ async def run_client(
         )
 
     # =========================================================================
-    # CLIENT REQUEST LATENCY
+    # CLIENT METRICS
     # =========================================================================
 
     print()
     print("=" * 80)
-    print("CLIENT REQUEST LATENCY")
+    print("CLIENT LATENCY")
     print("=" * 80)
 
     print(
-        f"Connection latency      : "
+        f"Connection / startup    : "
         f"{connection_latency_ms:.2f} ms"
     )
 
@@ -419,29 +475,10 @@ async def run_client(
         f"{client_total_ms:.2f} ms"
     )
 
-    # =========================================================================
-    # END-TO-END / COLD START OBSERVATION
-    # =========================================================================
-
     print()
     print("=" * 80)
-    print("END-TO-END / COLD START OBSERVATION")
+    print("END-TO-END LATENCY")
     print("=" * 80)
-
-    print(
-        f"Connection / startup    : "
-        f"{connection_latency_ms:.2f} ms"
-    )
-
-    print(
-        f"Connection -> response  : "
-        f"{connection_to_first_response_ms:.2f} ms"
-    )
-
-    print(
-        f"Connection -> audio     : "
-        f"{connection_to_first_audio_ms:.2f} ms"
-    )
 
     print(
         f"E2E TTFB                : "
@@ -459,7 +496,7 @@ async def run_client(
     )
 
     # =========================================================================
-    # SERVER LATENCY
+    # SERVER METRICS
     # =========================================================================
 
     print()
@@ -477,11 +514,6 @@ async def run_client(
         print(
             f"SERVER TTFT/TTFA        : "
             f"{server_metrics.get('ttft_ms')} ms"
-        )
-
-        print(
-            f"SERVER FIRST AUDIO      : "
-            f"{server_metrics.get('first_audio_ms')} ms"
         )
 
         print(
@@ -509,39 +541,269 @@ async def run_client(
             f"{server_metrics.get('rtf')}"
         )
 
-    else:
+    print()
+    print(
+        f"[output] "
+        f"{output_path.resolve()}"
+    )
 
-        print(
-            "No server metrics received."
+    if play:
+
+        play_pcm16(
+            pcm,
+            sample_rate,
+            channels,
         )
 
+
+# =============================================================================
+# OPENAI-COMPATIBLE HTTP CLIENT
+# =============================================================================
+
+async def run_openai(
+    server,
+    text,
+    language,
+    speaker,
+    instruct,
+    output,
+    play,
+    response_format,
+    speed,
+):
+    payload = {
+        "model": "qwen3-tts-0.6b",
+        "input": text,
+        "voice": speaker,
+        "instructions": instruct,
+        "response_format": response_format,
+        "speed": speed,
+        "language": language,
+    }
+
+    print()
+    print("=" * 80)
+    print("QWEN3-TTS OPENAI-COMPATIBLE CLIENT")
+    print("=" * 80)
+
+    print(
+        f"[POST] {server}"
+    )
+
     # =========================================================================
-    # COLD START INTERPRETATION
+    # TOTAL TIMER
+    # =========================================================================
+
+    overall_start_ns = now_ns()
+
+    first_byte_ns = None
+
+    audio_data = bytearray()
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=120.0,
+            read=600.0,
+            write=60.0,
+            pool=120.0,
+        )
+    ) as client:
+
+        # =====================================================================
+        # STREAM HTTP RESPONSE
+        # =====================================================================
+
+        async with client.stream(
+            "POST",
+            server,
+            json=payload,
+            headers={
+                "Content-Type": (
+                    "application/json"
+                )
+            },
+        ) as response:
+
+            headers_received_ns = (
+                now_ns()
+            )
+
+            response.raise_for_status()
+
+            print(
+                f"[status] "
+                f"{response.status_code}"
+            )
+
+            print(
+                f"[content-type] "
+                f"{response.headers.get('content-type')}"
+            )
+
+            async for chunk in (
+                response.aiter_bytes()
+            ):
+
+                if not chunk:
+                    continue
+
+                if first_byte_ns is None:
+
+                    first_byte_ns = (
+                        now_ns()
+                    )
+
+                    ttfa_ms = elapsed_ms(
+                        overall_start_ns,
+                        first_byte_ns,
+                    )
+
+                    print(
+                        f"[first-audio-byte] "
+                        f"{ttfa_ms:.2f} ms"
+                    )
+
+                audio_data.extend(
+                    chunk
+                )
+
+            done_ns = now_ns()
+
+            # =================================================================
+            # SERVER METRICS FROM HTTP HEADERS
+            # =================================================================
+
+            server_inference_ms = (
+                response.headers.get(
+                    "x-server-inference-ms"
+                )
+            )
+
+            server_encoding_ms = (
+                response.headers.get(
+                    "x-server-encoding-ms"
+                )
+            )
+
+            server_total_ms = (
+                response.headers.get(
+                    "x-server-total-ms"
+                )
+            )
+
+            audio_duration_s = (
+                response.headers.get(
+                    "x-audio-duration-s"
+                )
+            )
+
+            rtf = (
+                response.headers.get(
+                    "x-rtf"
+                )
+            )
+
+            sample_rate = (
+                response.headers.get(
+                    "x-sample-rate"
+                )
+            )
+
+    # =========================================================================
+    # METRICS
+    # =========================================================================
+
+    http_ttfb_ms = elapsed_ms(
+        overall_start_ns,
+        headers_received_ns,
+    )
+
+    http_ttfa_ms = (
+        elapsed_ms(
+            overall_start_ns,
+            first_byte_ns,
+        )
+        if first_byte_ns
+        else None
+    )
+
+    http_total_ms = elapsed_ms(
+        overall_start_ns,
+        done_ns,
+    )
+
+    # =========================================================================
+    # SAVE OUTPUT
+    # =========================================================================
+
+    output_path = Path(
+        output
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output_path.write_bytes(
+        bytes(audio_data)
+    )
+
+    # =========================================================================
+    # PRINT METRICS
     # =========================================================================
 
     print()
     print("=" * 80)
-    print("COLD START INTERPRETATION")
+    print("OPENAI-COMPATIBLE CLIENT LATENCY")
     print("=" * 80)
 
     print(
-        "Connection/startup includes network + TLS + WebSocket handshake "
-        "+ possible Cloud Run cold-start delay."
+        f"HTTP TTFB               : "
+        f"{http_ttfb_ms:.2f} ms"
     )
 
     print(
-        "E2E TTFA includes connection/startup + request processing "
-        "+ inference until first audio."
+        f"HTTP TTFT/TTFA          : "
+        f"{http_ttfa_ms:.2f} ms"
+        if http_ttfa_ms is not None
+        else "HTTP TTFT/TTFA          : N/A"
     )
 
     print(
-        "Compare this run against an immediate second warm run to "
-        "estimate cold-start overhead."
+        f"HTTP TOTAL              : "
+        f"{http_total_ms:.2f} ms"
     )
 
-    # =========================================================================
-    # OUTPUT
-    # =========================================================================
+    print()
+    print("=" * 80)
+    print("SERVER LATENCY")
+    print("=" * 80)
+
+    print(
+        f"SERVER INFERENCE        : "
+        f"{server_inference_ms} ms"
+    )
+
+    print(
+        f"SERVER ENCODING         : "
+        f"{server_encoding_ms} ms"
+    )
+
+    print(
+        f"SERVER TOTAL            : "
+        f"{server_total_ms} ms"
+    )
+
+    print(
+        f"AUDIO DURATION          : "
+        f"{audio_duration_s} s"
+    )
+
+    print(
+        f"RTF                     : "
+        f"{rtf}"
+    )
 
     print()
     print(
@@ -550,43 +812,46 @@ async def run_client(
     )
 
     # =========================================================================
-    # OPTIONAL PLAYBACK
+    # PLAYBACK
     # =========================================================================
 
     if play:
 
-        print()
-        print(
-            "[play] Playing generated audio..."
-        )
+        if response_format == "wav":
 
-        audio = np.frombuffer(
-            pcm,
-            dtype=np.int16,
-        )
-
-        if channels > 1:
-
-            audio = audio.reshape(
-                -1,
-                channels,
+            play_wav(
+                output_path
             )
 
-        audio = (
-            audio.astype(np.float32)
-            / 32768.0
-        )
+        elif response_format == "pcm":
 
-        sd.play(
-            audio,
-            samplerate=sample_rate,
-        )
+            if not sample_rate:
 
-        sd.wait()
+                raise RuntimeError(
+                    "Sample rate header "
+                    "missing."
+                )
 
-        print(
-            "[play] Finished."
-        )
+            play_pcm16(
+                bytes(audio_data),
+                int(sample_rate),
+                1,
+            )
+
+        else:
+
+            print()
+            print(
+                "[play-warning] "
+                "Direct playback is currently "
+                "supported for WAV or PCM."
+            )
+
+            print(
+                "Use "
+                "--response-format wav "
+                "when using --play."
+            )
 
 
 # =============================================================================
@@ -597,55 +862,78 @@ def parse_args():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Qwen3-TTS Cloud Run WebSocket client "
-            "with latency, cold-start observation, "
-            "and optional playback"
+            "Qwen3-TTS client supporting "
+            "WebSocket and OpenAI-compatible HTTP APIs"
         )
     )
 
     parser.add_argument(
-        "--server",
-        default=DEFAULT_SERVER,
+        "--mode",
+        choices=[
+            "websocket",
+            "openai",
+        ],
+        default="websocket",
         help=(
-            "WebSocket server URL. "
-            f"Default: {DEFAULT_SERVER}"
+            "API mode: websocket or openai"
+        ),
+    )
+
+    parser.add_argument(
+        "--server",
+        default=None,
+        help=(
+            "Override server URL"
         ),
     )
 
     parser.add_argument(
         "--text",
         required=True,
-        help="Text to synthesize",
     )
 
     parser.add_argument(
         "--language",
         default="English",
-        help="Language",
     )
 
     parser.add_argument(
         "--speaker",
         default="Aiden",
-        help="Speaker name",
     )
 
     parser.add_argument(
         "--instruct",
         default="",
-        help="Voice instruction",
     )
 
     parser.add_argument(
         "--output",
-        default="output.wav",
-        help="Output WAV file",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--response-format",
+        choices=[
+            "wav",
+            "mp3",
+            "opus",
+            "aac",
+            "flac",
+            "pcm",
+        ],
+        default="wav",
+    )
+
+    parser.add_argument(
+        "--speed",
+        type=float,
+        default=1.0,
     )
 
     parser.add_argument(
         "--play",
         action="store_true",
-        help="Play generated audio locally",
     )
 
     return parser.parse_args()
@@ -659,17 +947,70 @@ def main():
 
     args = parse_args()
 
-    asyncio.run(
-        run_client(
-            server=args.server,
-            text=args.text,
-            language=args.language,
-            speaker=args.speaker,
-            instruct=args.instruct,
-            output=args.output,
-            play=args.play,
+    if args.mode == "websocket":
+
+        server = (
+            args.server
+            or DEFAULT_WS_SERVER
         )
-    )
+
+        output = (
+            args.output
+            or "qwen_websocket.wav"
+        )
+
+        asyncio.run(
+            run_websocket(
+                server=server,
+                text=args.text,
+                language=args.language,
+                speaker=args.speaker,
+                instruct=args.instruct,
+                output=output,
+                play=args.play,
+            )
+        )
+
+    else:
+
+        server = (
+            args.server
+            or DEFAULT_OPENAI_SERVER
+        )
+
+        if args.output:
+
+            output = args.output
+
+        else:
+
+            extension = (
+                "raw"
+                if args.response_format
+                == "pcm"
+                else args.response_format
+            )
+
+            output = (
+                f"qwen_openai."
+                f"{extension}"
+            )
+
+        asyncio.run(
+            run_openai(
+                server=server,
+                text=args.text,
+                language=args.language,
+                speaker=args.speaker,
+                instruct=args.instruct,
+                output=output,
+                play=args.play,
+                response_format=(
+                    args.response_format
+                ),
+                speed=args.speed,
+            )
+        )
 
 
 if __name__ == "__main__":
