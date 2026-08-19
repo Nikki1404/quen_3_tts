@@ -1,11 +1,6 @@
-transformers
-accelerate
+qwen-tts
 fastapi
 uvicorn[standard]
-numpy
-scipy
-soundfile
-requests
-pydantic
-faster-whisper
-jiwer
+websockets>=15,<18
+numpy>=1.26,<3
+huggingface_hub[cli]
