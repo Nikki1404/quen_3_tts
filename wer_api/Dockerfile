@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+ENV https_proxy="http://163.116.128.80:8080"
+ENV http_proxy="http://163.116.128.80:8080"
+
 WORKDIR /app
 
 COPY requirements.txt .
